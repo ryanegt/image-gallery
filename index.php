@@ -1,54 +1,58 @@
 <?php
-
-/** Variable definitions - You can change this stuff */
-
-
-$albumName = "";            // Name of this photo album
-$thumbSize = "150";         // Size of thumbnails (max width/height) in pixels
-$password  = "";            // Password for protected files
-$thumbDir  = "./thumbs/"; 	// Directory where to put thumbnails */
-$tagPattern= "<[a-zA-Z0-9_]{1,}>";  // Identify security tags
-
 /*
-* Don't mess with anything below this line - unless of course you know what you're doing.
+* Title   : Roddzilla Gallery
+* File    : index.php
+* Created : 6/05/2005
+* Updated : 6/25/2009
+* Author  : Ryan Rodd
+* Info    : Single file application which indexes
+*           and processes a directory of raw jpeg
+*		    files. Lets users add meta to images.
+* Version : 3.0
 */
 
 /*
-* Title  : Roddzilla Gallery
-* File   : index.php
-* Created: 06/05/2005
-* Updated: 10/14/2008
-* Author : Ryan Rodd
-* Info   : Single file application which indexes
-*          and processes a directory of raw jpeg
-*		   files. Lets users add meta to images.
-* Version: 2.0
-* Copyright: Ryan Rodd (c). 2005
+* Settings that can be changed
+* WARNING : Don't change these values if you've already run the installation
 */
 
+$albumName = "ryanrodd.com - Gallery";		// Defaults to directory name
+$thumbSize = 750;				// Size of thumbnail max w or h
+$thumbSqr  = 100;				// Size of square thumbnails
+$thumbQlt  = 90;				// Thumbnail quality (0-100) 85-90 is suggested
+$thumbPfx  = "th_";				// Filename prefix for regular thumbs
+$thumbSfx  = "thsq_";  			// Filename prefix for square thumbs
+$thumbDir  = "thumbs"; 	        // Directory where to put thumbnails
+$password  = "";				// Unlock protected files - deprecated
+
+$tagPattern = "<[a-zA-Z0-9_]{1,}>";            // Identify security tags - deprecated
+$imageExt   = array("jpg","jpeg","png","gif"); // Supported image types
+$videoExt	= array("avi","mkv","qt","mpg");   // Supported video types
+
+/*
+* End of changeable settings.
+* Don't change anything below unless you know
+* what you're doing.
+*/
+
+// Keep the session
 session_start();
-ini_set("memory_limit","64M");
 header ("Cache-control: private");
 
-if(isset($_GET['uncache'])) {
-	header("Cache-Control: no-cache, must-revalidate");
-	header("Expires: Mon, 26 Jul 1997 05:00:00 GMT");
+// Up the limit for image processing
+ini_set("memory_limit","256M");
+ini_set("max_execution_time", "3000");
+set_time_limit(300);
+
+// Default album name
+if($albumName == "") {
+	$scriptarr = explode("/",$_SERVER['SCRIPT_NAME']);
+	$albumName = ucwords($scriptarr[sizeof($scriptarr)-2])." Gallery";
 }
 
-$imgArr    = array();
-$fileArr   = array();
-$inform    = array();
-$info      = &$inform;
-$tagPattern= "<[a-zA-Z0-9_]{1,}>";  // Identify security tags
-$image_ext = array("jpg","jpeg");   // Image types to accomodate */
-
-
-if($albumName == "") $albumName = "Gallery: ".ucwords(array_pop(explode("/",substr($_SERVER['REQUEST_URI'],0,-1))));
-
-
 /*
-* Func: iptcMaketag
-* Desc: writing data to image iptc data
+* Func : iptcMakeTag
+* Desc : For writing data to image iptc
 */
 function iptcMaketag($rec,$dat,$val){
 	$len = strlen($val);
@@ -66,8 +70,8 @@ function iptcMaketag($rec,$dat,$val){
 }
 
 /*
-* Func: cutString
-* Desc: shorten a string and add dots
+* Func : cutString
+* Desc : A favorite of mine
 */
 function cutString($str, $len, $dots = "...") {
     if (strlen($str) > $len) {
@@ -79,7 +83,7 @@ function cutString($str, $len, $dots = "...") {
 
 /*
 * Func: redirect
-* Desc: change page to the specified
+* Desc: Another favorite
 */
 function redirect($place,$time = 0){
 	print '<meta http-equiv="refresh"
@@ -87,515 +91,750 @@ function redirect($place,$time = 0){
 }
 
 /*
-* Func: createThumb
-* Desc: make a thumbnail from an images
+* Func: makeThumb
+* Desc: Update, sexier createThumb function
 */
-function createThumb($file,$new_size,$quality=85) {
-	global $thumbDir;
-	$simg = imagecreatefromjpeg($file);
-    $old_x   = imageSX($simg);
-    $old_y   = imageSY($simg);
+function makeThumb($img,$dest,$maxsize,$sqr=0,$qual=90) {
+	if(!$info=getimagesize($img))
+	    return false;
 
-    if ($old_x > $old_y) {
-        $center = ($old_x/2);
-        $src_x  = $center - ($old_y/2);
-        $src_y  = 0;
-        $src_size = $old_y;
-    }
-    if ($old_x < $old_y) {
-        $center = ($old_y/2);
-        $src_y  = $center - ($old_x/2);
-        $src_x  = 0;
-        $src_size = $old_x;
-    }
-    if ($old_x == $old_y) {
-        $src_x = 0;
-        $src_y = 0;
-        $src_size = $old_y;
-    }
-    $dst_img = imagecreatetruecolor($new_size,$new_size);
-    imagecopyresized ($dst_img, $simg, 0, 0, $src_x,
-	$src_y,	$new_size, $new_size, $src_size, $src_size );
-    imagejpeg($dst_img,$thumbDir.$file);
-    imagedestroy($dst_img);
-    imagedestroy($simg);
-    if(is_file($thumbDir.$file)) {
-    	chmod($thumbDir.$file, 0755);
-		return true;
+	// Import the file into gd
+	switch ($info['mime']) {
+		case 'image/jpeg':$src = imagecreatefromjpeg($img);break;
+		case 'image/gif': $src = imagecreatefromgif($img); break;
+		case 'image/png': $src = imagecreatefrompng($img); break;
+		default: return false;
 	}
-    else return false;
+	// Do the resizing - oh yes, sexy code
+	$thx = $thy = 0;
+	$thw = $thh = $maxsize;
+	$aspect = $info[0]/$info[1];
+
+	// Large thumbnails
+	if(!$sqr) {
+	   	if(max($info[0],$info[1]) > $maxsize) {
+		   	if($aspect > 1) $thh = round($maxsize/$aspect);
+		   	elseif($aspect < 1) $thw = round($maxsize*$aspect);
+	    } else {
+	        $thw = $info[0];
+	        $thh = $info[1];
+	    }
+	}
+	// Little square thumbnails - alter src_x and src_y
+	else {
+		if($aspect > 1) $thx = ($info[0]/2)-($info[1]/2);
+		elseif($aspect < 1) $thy = ($info[1]/2)-($info[0]/2);
+		$info[0] = $info[1] = min($info[0],$info[1]);
+	}
+    // Create the thumb
+	$thumb=imagecreatetruecolor($thw,$thh);
+	imagecopyresampled($thumb,$src,0,0,$thx,$thy,$thw,$thh,$info[0],$info[1]);
+	imagejpeg($thumb,$dest,$qual);
+
+	// Garbage collection
+	imagedestroy($thumb);
+	imagedestroy($src);
 }
 
 /*
-* Func: rotateImage
-* Desc: turn an image around
+* Func : dirScan
+* Desc : Recursive directory scan... new in 3.0!
 */
-function rotateImage($file,$angle) {
-	$src_img = imagecreatefromjpeg($file);
-    $dst_img = imagerotate($src_img, $angle, 0);
-    imagejpeg($dst_img,$file,95);
-    imagedestroy($dst_img);
-    imagedestroy($src_img);
-    // Rotate the thumbnail too.
-    $tname = $thumbDir.$file;
-	$tsrc_img = imagecreatefromjpeg($tname);
-    $tdst_img = imagerotate($tsrc_img, $angle, 0);
-    imagejpeg($tdst_img,$tname,95);
-    imagedestroy($tdst_img);
-    imagedestroy($tsrc_img);
+function dirScan($dir,$filter=1) {
+	global $imageExt,$thumbDir;
+	$dirs   = array_diff(scandir($dir),array(".",".."));
+	$dirarr = array();
+	foreach($dirs as $d) {
+		if(is_dir($path=$dir."/".$d) && !strstr($path,$thumbDir) && !strstr($path,"VIZ"))
+			$dirarr = array_merge($dirarr,dirScan($path));
+		else {
+			if(in_array(strtolower(end(explode(".",$d))),$imageExt))
+				$dirarr[$path] = array("dir"=>$dir,"file"=>$d,"full"=>$path);
+		}
+	}
+	return $dirarr;
 }
 
 /*
-* Func: scanDir
-* Desc: supplement to non-PHP 5 systems
+* Func : simpScan
+* Desc : Non-recursive directory scan.
 */
-if(!function_exists("scandir")) {
-	function scandir($dir, $sortorder = 0) {
-        if(is_dir($dir) && $dirlist = @opendir($dir)) {
-            while(($file = readdir($dirlist)) !== false) {
-                $files[] = $file;
-            }
-            closedir($dirlist);
-            ($sortorder == 0) ? asort($files) : rsort($files);
-            return $files;
-        } else return false;
-    }
+function simpScan($dir,$filter=1) {
+	global $imageExt,$thumbDir;
+	$dirs   = array_diff(scandir($dir),array(".",".."));
+	$dirarr = array();
+	foreach($dirs as $d) {
+		if(is_dir($path=$dir."/".$d) && !strstr($path,$thumbDir))
+			$dirarr[$path] = array("dir"=>$dir,"file"=>$d,"full"=>$path);
+	}
+	return $dirarr;
 }
 
 /*
-* Func: scanImg
-* Desc: same as scan dir but return only images
+* End function set and begin actions. Actions are called
+* and performed by the script through $_GET['act'].
 */
-function scanImg($dir, $sortorder = 0) {
-	global $image_ext;
-    $cdir = scandir($dir,$sortorder);
-	foreach($cdir as $file) {
-		in_array(strtolower(end(explode(".", $file))),$image_ext)?
-		$imgArr[] = $file : $fileArr[] = $file;
+$do = $_GET['act'];
+
+if($do == "makethumb") {
+	$allFiles =  dirScan('.');
+
+	// Find and replace illegal characters
+	$chars = array("&"=>"and","'"=>"sq");
+	$old_file = $allFiles[$_GET['file']]["full"];
+	$allFiles[$_GET['file']]["file"] = str_replace(
+		array_keys($chars),
+		array_values($chars),
+		$allFiles[$_GET['file']]["file"]
+	);
+	rename($old_file,$allFiles[$_GET['file']]["full"]);
+
+	// Make folder if it doesn't exist
+	$folder = $allFiles[$_GET['file']]["dir"]."/".$thumbDir."/";
+	if(!is_dir($folder)) mkdir($folder);
+
+	$filename = $thumbSfx.$allFiles[$_GET['file']]["file"];
+	$filename1= $thumbPfx.$allFiles[$_GET['file']]["file"];
+
+	// Make large thumbnail
+	if(isset($_GET['lg'])) {
+		makeThumb($_GET['file'],$folder.$filename1,$thumbSize,$sqr=0,85); $msg.="Large thumbnail created.";
 	}
-	return $imgArr;
+	else {
+		// Make square thumbnail from larger thumb if it exists
+		$file=(is_file($filename1))?$filename1:$_GET['file'];
+		// Make square thumbnail
+		makeThumb($file,$folder.$filename,$thumbSqr,$sqr=1,75); $msg="Square thumbnail created. ";
+	}
+
+	echo json_encode(array(
+		"file"=>$_GET['file'],
+		"sqfile"=>$filename,
+		"path"=>$folder.$filename,
+		"dir" =>$folder,
+		"msg" =>$msg
+	));
 }
 
 /*
-* Func: iptc_maketag
-* Desc: format tag meta to Base64
+* Check if large/reg thumbnail exists
 */
-function iptc_maketag($rec,$dat,$val){
-	$len = strlen($val);
-	if ($len < 0x8000)
-		return chr(0x1c).chr($rec).chr($dat).
-		chr($len >> 8).
-		chr($len & 0xff).
-		$val;
-	else
-		return chr(0x1c).chr($rec).chr($dat).
-		chr(0x80).chr(0x04).
-		chr(($len >> 24) & 0xff).
-		chr(($len >> 16) & 0xff).
-		chr(($len >> 8 ) & 0xff).
-		chr(($len ) & 0xff).
-		$val;
+if($do == "exist"){
+
+	$ret=(is_file($_GET['d']."/".$thumbDir."/".$thumbPfx.$_GET['f']))?1:0;
+
+	echo json_encode(array(
+		"file"=>$_GET['f'],
+		"thumb"=>$_GET['d']."/".$thumbDir."/".$thumbPfx.$_GET['f'],
+		"ret"=>$ret
+	));
+
+}
+
+/*
+* Display embedded images
+*/
+if($do == "ico"){
+
+	// Folder icon
+	$img[1] = "R0lGODlhEAAOALMAAOazToeHh0tLS/7LZv/0jvb29t/f3//Ub/
+	/ge8WSLf/rhf/3kdbW1mxsbP//mf///yH5BAAAAAAALAAAAAAQAA4AAARe8L1Ekyky67QZ1hLnjM5UUde0ECwLJoExKcpp
+	V0aCcGCmTIHEIUEqjgaORCMxIC6e0CcguWw6aFjsVMkkIr7g77ZKPJjPZqIyd7sJAgVGoEGv2xsBxqNgYPj/gAwXEQA7";
+
+	// Image icon
+	$img[2] = "R0lGODlhEAAQAMQfAHipU2WWl5vHjoGzqsfOppet0Zqw0e7z9/P195i25Hmf0pTHZefu9tKkXIjB
+	V4GIToa4cIip3cnU46bQfqm61cLcv5Ws0H+9U2aZP5+755l7NYCkxpC10Ozu8a+GP////yH5BAEA
+	AB8ALAAAAAAQABAAQAWE4CeOZCkWR8YNkAMBgRIxhmghySBMSw/FNNuhQiwaGQURpYNoOp2HTu1z
+	y/Ecl2xgNi10AGBNo+HBmIMfCcXAbhsKbYlIbbDY73eD/GPArXYTAjEKB1NVAzwLDg6CCmgoGToL
+	WRc/M0kfkCoPnA8bEVxCRQQEDUdTSwcIB6ytrFImsSQhADs=";
+
+	// Video icon
+	$img[3] = "R0lGODlhEAAQAMQfAGdnZ1hYWKysrG+82nZ2djU1NYeHh0tLS3HF/J7hc9jYkmW7/JLeV5iYmHS8
+	6mPJUKPiehEREZXhXGnF3XrYWPXecazMrmLHcFKvzFi4tl28TF7Af2rRQpzeb2y57P///yH5BAEA
+	AB8ALAAAAAAQABAAQAWJ4CeOZDkCBBCsbHEUpCEQ24QsVgUIAbkHDwrnksEUGrARQaBirQ4NAInQ
+	IASHxQDh4DMAarfcgZAUFQQF5yoiiMQIBpNKeko57h5F5QAof+BWGhMLCwMBAFxKMwkQEBKPAQ2J
+	IlQECJcICgoBBpMfhwAagoQDBy8kBX0dEAkMrhEAbiMvnmYRsiEAOw==";
+
+	// Roddzilla logo
+	$img[4] = "R0lGODlhGgAVAOYAAAAAAP///8XGxrO0tKSlpdPR0dLQ0MjGxuzr6+no6Ojn5+Xk5OTj4+Pi4uLh
+	4eDf39/e3t3c3Nzb29va2tnY2NjX19fW1tbV1dXU1NTT09PS0tLR0dHQ0NDPz8/Ozs7Nzc3MzMzL
+	y8vKysrJycjHx8fGxsbFxcTDw8PCwsLBwcC/v7++vr69vb28vLy7u7u6urq5ubi3t7a1tbW0tLSz
+	s7OysrCvr6+urq6tra2srKyrq6uqqqqpqainp6WkpKOiou3t7ezs7Ovr6+rq6unp6ejo6Ofn5+bm
+	5uXl5eTk5OPj4+Li4uHh4eDg4N/f397e3t3d3dzc3Nvb29ra2tnZ2djY2NfX19bW1tXV1dPT09LS
+	0tDQ0M/Pz87OzszMzMvLy8fHx8XFxcTExMPDw8LCwr6+vr29vby8vLq6uri4uLa2trW1tbS0tLOz
+	s7KysrGxsbCwsK+vr66urq2traysrKqqqqmpqaenp6ampqKiov///wAAAAAAAAAAAAAAAAAAACH5
+	BAEAAHoALAAAAAAaABUAAAf/gHqCg4SCQEZSYGtraGNZQYWRg0ZZZjg7KhkTRpKdSGByOzAeUEWC
+	Q09XWFSmkkJednRkHUxDek9hazs4bWoxaBpAhU0DeCocGA6CTV9cWRscGhvQIFWEWHc1IBkZC50S
+	0dMaEoNbPi4aGRsWVCgrXZyEHh3TG1GCV3krGdIbGSIoSJwgc2+QkhbqNihbUueFOg0WJECQcOEC
+	vw9IBhGhMa3CECBlbETDICGeHiEVommQMujIjQ4akuhxcocEhgtLBCWBJGjENAvC9FDRwWGCMAFt
+	uDHQo+UNHDNPBGk5cZNnGRkWiAhqkwJDEz1iCLT4wKGDrSsxMkwRFOUHiYyCnuSEsCLEyo8D/DRc
+	kMlFRoalROSsUUKIDi09cVhgqKfBWxkXERAMaZODSSE6BZAA6dHhAQVpGBIYwePFCBA2cxpEcmOA
+	8AzCU0iM03OmRhIhbWjALRQGBDlvesbIwKDgCo8mSdqMsSWJSQoLVoAA2ZLHBJImMppMSbOl0yAp
+	GzSgaOMDDBInJZxYGCHT+yAkEqhgcCKkSBYhTibwdB8IADs=";
+
+	// Thinking animated gif
+	$img[5] = "R0lGODlhDAAMAOZ8AO7u7pWVlaqqqr+/v3FxcdLS0tLS04GBgoKCgoKBgm5ubuPj4+Pi4uPj4pub
+	m7m5uXFycaampt7e3t/f33h4d4GCgnp6e+Lj45qamsTExOrq6uLi45CQkODf4MfHx3Fycs/Pz25t
+	bYWFhdPT03V1dbCvr5mZmWxsbOzs66SlpHV2dcXFxX1+fdXV1tfX1nJycczNzZGRkra2ttnZ2dLT
+	04iIh83MzaGhobu8vN3c3NjX2Nzc3OXl5a6urZubmnd2dnZ2dn19fYmJioeGhomKiZ6dnuvs7Obm
+	5p6enY+Pjuzt7dbX19PT0nx9fMvKyujo6LGwsNXW1cPCwm9vb3Jycs7Nzq6urru7u39+fs7OzoKC
+	gbq5ueXm5t7f37q6uqSlpevr683OzZaVlefn5+vr7LOzs9fX1+bm57a2t4iHh8LDw3JxcX5/f6+v
+	r42MjYeHhoaGhnR0dKSjpMXGxuzs7bOzsrGxsezs7MrLy6Wlpb6/v46Ojv///wAAAAAAAAAAACH/
+	C05FVFNDQVBFMi4wAwEAAAAh+QQFAAB8ACwAAAAADAAMAAAHO4B8goOEhYIkL4Z8FWx8PwR8AACE
+	IgiEkoqZHEmGT2OCAQGGFwuZijdfhAVmhBECfGgDfFkGig+ypoqBACH5BAUAAHwALAEAAQAKAAoA
+	AAc2gHyCfHAIg4IBMXw1hhRxgiYBhyQfh5aCeXKXAAACApsAl5YyW4cLR4JXA3x4BXwTDZY2BoeB
+	ACH5BAUAAHwALAEAAQAKAAoAAAc3gHyCfBgBg4ICEXwOhkIiglYCh0MJh5aCXg+XFEB6A5cfBJeW
+	TlWHAACCIAV8ORt8d6mHEg2HgQAh+QQFAAB8ACwBAAEACgAKAAAHN4B8gnwlAoOCAzh8UIZFJoJq
+	A4c+AYeWgmEwl0RpBjSXBwmXljtdh1Qqgh0XfBoAfAoQlmSvg4EAIfkEBQAAfAAsAQABAAoACgAA
+	BzeAfIJ8GQODgiMgfCuGZT2CUUyHJQKHloITEpdIDgwLlwEBl5YaRocVb4JKAHwnEHxBWpYhBIeB
+	ACH5BAUAAHwALAEAAQAKAAoAAAc4gHyCfC4Gg4IMHXw6BXweUoI8DYcZA4eXgihgmHV2AACYAgKY
+	lycKh2IYglNrfBYHfBwBl02wg4EAIfkEBQAAfAAsAQABAAoACgAABzeAfIJ8XAyDggB0fGcbfDMt
+	iACHSyOHloIKIZcecwQElwMDl5YWLIcCbYJYCXxuAXwpApZ7r4OBADs=";
+
+	header("Content-type: image/gif");
+	echo base64_decode($img[$_GET['img']]);
 }
 
 
+// Kill output on actions
+if(isset($_GET['act'])) die();
 
-/** End Function set */
-
-
-
-if($_GET['act']=="makethumb") {
-	if(!is_file($thumbDir.$_GET['file'])) {
-		if(createThumb($_GET['file'],$thumbSize,100)) echo 1;
-		else echo 0;
-	}
-	else
-		echo 0;
-
-} elseif($_GET['act']=="embed") {
-
-   if($_POST['password']!=$password)
-    	die("Password incorrect. Please go back and try again.");
-
-	$iptc_old["2#005"][0] = $_POST['title']."";
-	$iptc_old["2#120"][0] = $_POST['desc']."";
-	$iptc_old["2#080"][0] = $_POST['author']."";
-
-	foreach (array_keys($iptc_old) as $s){
-		$tag = str_replace("2#", "", $s);
-		$iptc_new .= iptcMakeTag(2, $tag, $iptc_old[$s][0]);
-	}
-
-	$content = iptcembed($iptc_new, $_GET['file'],0);
-	$fp = fopen($_GET['file'],"w");
-	fwrite($fp, $content);
-	fclose($fp);
-
-	$content = iptcembed($iptc_new, $thumbDir.$_GET['file'],0);
-	$fp = fopen($thumbDir.$_GET['file'],"w");
-	fwrite($fp, $content);
-	fclose($fp);
-	$s = $_GET['r']+1;
-	print "<html><head><script type=\"text/javascript\">
-		window.opener.location.href='?v=g&uncache&r=".$s."#".reset(explode(".",$_GET['file']))."';</script></head>
-		<body>Please wait...</body></html>";
-	redirect($_SERVER['HTTP_REFERER']);
-
-} elseif($_GET['act']=="image") {
-	header("Content-Type: image/jpeg");
-	if(isset($_GET['download']))
-		header("Content-Disposition: attachment; filename=".$_GET['file']);
-	$rec = imagecreatefromjpeg($_GET['file']);
-
-	if(isset($_GET['maxsize'])) {
-		$size = getimagesize($_GET['file']);
-
-		if($size[0] > $size[1]) $divisor = $size[0] / $_GET['maxsize'];
-		else $divisor = $size[1] / $_GET['maxsize'];
-
-		$new_width  = round($size[0] / $divisor);
-		$new_height = round($size[1] / $divisor);
-     	// load original image
-		$image_small = imagecreatetruecolor($new_width, $new_height);
-		     // create new image
-		imagecopyresampled($image_small, $rec, 0,0, 0,0, $new_width,$new_height, $size[0],$size[1]);
-	}
-
-    imagejpeg($image_small,"",100);
-    imagedestroy($image_small);
-    imagedestroy($rec);
-
-} elseif($_GET['act']=="auth") {
-	if($_POST['tag'])
-		$_SESSION['gall_perm'] .= $_POST['tag'];
-	if(isset($_GET['clear']))
-		$_SESSION['gall_perm'] = "";
-	redirect($_SERVER['HTTP_REFERER']);
-}
-
-if(isset($_GET['act'])) die;
 ?>
 
-<html>
-<head>
+<!-- begin html output -->
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head><title><?php echo $albumName; ?></title>
+<meta http-equiv="Content-Type" content="text/html; charset=ISO-8859-1" />
+
+<!-- style information  -->
+
 <style type="text/css">
 body {
-  font-family: tahoma;
-  font-size: 12px;
-  margin: 0;
-  <?php echo ($_GET['v']=="meta")?"padding:0px;":"padding:10px;"; ?>
-
+	font-family: lucida grande,helvetica,verdana,arial;
+	font-size:11px;margin:0;padding:0px;line-height:18px;
 }
-.cleared {
-  margin: 0;
-  padding-bottom: 4px;
-  vertical-align: middle;
-  border-collapse: collapse;
-  font-size: 12px;
+.thumbholder a:link,
+.thumbholder a:visited,
+.thumbholder a:active {
+	color:#fff;
+	text-decoration: none;
+}
+.cl {
+	margin:0;padding-bottom:4px;vertical-align: middle;
+	border-collapse: collapse;
 }
 p,h1,form {
-  margin:0;
-  padding:0;
+	margin:0;padding:0;
+}
+.installtop {
+	width:100%;background-color:#eee;
+	vertical-align:bottom;border-bottom:1px solid #ccc;
 }
 .area {
-  border:1px solid #D4D0C7;
-  font-size:11px;
-  font-family:tahoma;
-  padding:2px;
-  margin:0;
+	border:1px solid #D4D0C7;font-size:12px;
+	font-family:tahoma;padding:2px;margin:0;
 }
 img {
-  vertical-align:middle;
-  padding-bottom: 2px;
+	vertical-align:middle;
+	padding-bottom: 2px;border:0px;
 }
+#progress {
+	background-color:blue;line-height:22px;
+	height:22px;width:0.1%;
+}
+#progBarHolder{
+	visibility:hidden;
+}
+.sqthumbs {
+	float:left;padding:8px;
+}
+#shadbg
+{
+	background-color:#000;filter:alpha(opacity=86);-moz-opacity:0.86;opacity:0.86;
+	visibility:hidden;position:absolute;width:100%;color:#fff;z-index:5;
+	cursor:pointer;
+}
+
+.thumbholder
+{
+	position:absolute;z-index:6;cursor:pointer;
+	width:100%;text-align:center;visibility:hidden;
+}
+
 </style>
 
+
+<!-- going to use the google hosted jquery library -->
+<script type="text/javascript" src="http://ajax.googleapis.com/ajax/libs/jquery/1.3.2/jquery.min.js"></script>
+<!-- url parser helper -->
+<script type="text/javascript" src="http://github.com/cowboy/jquery-bbq/raw/master/jquery.ba-bbq.js"></script>
+
+<!-- scripts -->
 <script type="text/javascript">
-var thumbCount = 0;
-var processing = 0;
-var processByt = 0;
-var metaDebug  = 0;
+// Processing semaphore
+var aid = 0;
+var iarr = new Array();
+var bover = 0;
+var processing = false;
+var lastimg;
+var timer;
 
-function findPos(obj) {
-	var curleft = curtop = 0;
-	if (obj.offsetParent) {
-		curleft = obj.offsetLeft
-		curtop = obj.offsetTop
-		while (obj = obj.offsetParent) {
-			curleft += obj.offsetLeft
-			curtop += obj.offsetTop
+/*
+* Func: getObj(name) - return an object
+*/
+function getObj(name) {
+	obj = document.getElementById(name);
+	if(obj==null){ alert("Object ID: "+name+" could not be found."); }
+	return obj;
+}
+
+/*
+* Func: redirect(loc,time) - pretty basic
+*/
+function redirect(mylocation,mytime) {
+	var rDTime = setTimeout( function(){
+		location.href = mylocation.replace('#','');
+	},mytime);
+}
+
+/*
+* Func: popWindow(id,url,x,y)
+*/
+function popWindow(id,url,x,y) {
+	day = new Date();
+    eval(id+"=window.open(url,'"+id+"','toolbar=0,scrollbars=0,"
+    	+ "location=0,statusbar=1,menubar=0,resizable=0,"
+    	+ "width="+x+",height="+y+",left=400,top=300');");
+}
+
+/*
+* Func: makeThumb(file)
+*/
+function makeThumb(file,type) {
+	processing = true;
+	console("Processing image: "+file);
+
+	var lg=(type=="lg")?"&lg":"";
+	$.getJSON("?act=makethumb"+lg+"&file="+file,function(data) {
+		lastimg = data.dir+data.sqfile;
+		processing=false;
+	});
+}
+
+/*
+* Func: install()
+*/
+function install() {
+	var count = 0;
+	var total = ($('#lgthumbs').attr('checked'))?
+			(lgfiles.length+sqfiles.length):sqfiles.length;
+
+	// Combine large and small thumbs
+	var files = new Array();
+
+	if($('#lgthumbs').attr('checked') && lgfiles.length>0) {
+		for(var j=0;j<lgfiles.length;j++) {
+			files.push({"name":lgfiles[j],"type":"lg"});
 		}
 	}
-	return [curleft,curtop];
-}
 
-function makeRequestObject() {
-	if (window.XMLHttpRequest) {
-		return new XMLHttpRequest();
+	if(sqfiles.length>0) {
+		for(var i=0;i<sqfiles.length;i++)
+			files.push({"name":sqfiles[i],"type":"sq"});
 	}
-	else if(window.ActiveXObject) {
-    	return new ActiveXObject("Microsoft.XMLHTTP");
+
+	if(files.length==0) {
+		$('#installmsg').html("Thumnails are all already made!");
+		return;
 	}
-}
 
-function sendGetReq(reqOb,reqURL) {
-	if (reqOb.readyState == 4 || reqOb.readyState == 0) {
-		reqOb.open("GET", reqURL, true);
-		reqOb.onreadystatechange = handlerFunc;
-		reqOb.send(null);
-	}
-}
+	// Button feedback
+	$('#continue').val("Installing...");
+	$('#continue').attr('disabled', 'disabled');
+	$('#lgthumbs').attr('disabled', 'disabled');
+	$('#showcons').attr('disabled', 'disabled');
+	$('#installmsg').html("Please do not navigate away from this page during installation...");
 
-function makeThumb(file) {
-	imgObj = makeRequestObject();
-	imgReq = "?act=makethumb&file="+file;
-	handlerFunc = function() { handleMakeThumb(); }
-	sendGetReq(imgObj,imgReq);
-	processing = 1;
-}
+	// Reveal progress bar and info
+	getObj("progBarHolder").style.visibility="visible";
+	if(getObj("showcons").checked) getObj("wholeconsole").style.visibility="visible";
 
-function handleMakeThumb() {
-	if (imgObj.readyState == 4) {
-		processing = 0;
-		return true;
-	}
-}
-
-function generateThumbs(arr) {
-	var thumbIndex = 0;      // Scope:function
-	thumbCount = arr.length; // Scope:global
+	// The installation loop
 	timer = setInterval(function() {
-		if(thumbCount < 1) {
+		// Track the install progress
+		var donePerc = ((count/total)*100).toFixed(2);
+		$('#countHolder').html(count+" of "+total+" complete.");
+		$('#antiprog').html(donePerc+"%");
+		$('#progress').width(donePerc+"%");
+
+		// When finished
+		if(count >= total) {
 			clearInterval(timer);
-			location.href = '?v=g';
+			$('#installmsg').html("Install successful! Please wait while you're redirected...");
+			redirect("?view=gallery",3000);
 		}
-		if(processing == 0) {
-			document.getElementById('imagename').innerHTML = arr[thumbCount];
-			document.getElementById('instImg').src = "thumbs/"+arr[thumbCount];
-			document.getElementById('icount').innerHTML = thumbCount;
-			document.getElementById('imageperc').innerHTML =
-				Math.round(((arr.length-thumbCount)/arr.length)*100);
-			donePixels = Math.round(((arr.length-thumbCount)/arr.length)*400);
-			ndonePixels = 400-donePixels;
-			try {
-				document.getElementById('progressfull').width = donePixels+'px';
-				document.getElementById('progressempty').width = ndonePixels+'px';
-				makeThumb(arr[thumbCount-1]);
-			} catch(e) {}
-			thumbCount--;
+
+		// Make the thumbnails
+		if(!processing) {
+			// Show images made
+			if(count!=0) $('#imgholder').append("<img src='"+lastimg+"'>&nbsp;");
+			if(count%6==0&&count!=0) $('#imgholder').html('');
+
+			makeThumb(files[count].name,files[count].type);
+			count++;
 		}
 	},50);
 }
 
-function placeMeta() {
-	if(metaDebug==1) {
-		alert('test');
-		metaDebug=0;
-	}
-	for(var i=0; i<document.images.length; i++) {
-		thisImg = document.images[i];
-		thisDiv = document.getElementById('info_'+thisImg.id);
-		thisDiv.style.top = (findPos(thisImg)[1]) + thisImg.height + 20;
-		thisDiv.style.left= (findPos(thisImg)[0]) + 15;
-		thisDiv.width     = thisImg.width;
+/*
+* Func: console()
+*/
+function console(msg) {
+	if($('#showcons').attr('checked')) {
+		if(getObj("console").scrollHeight > 5000)
+			$('#consoletxt').html('');
+		$('#consoletxt').append(msg+"<br>");
+		getObj("console").scrollTop = getObj("console").scrollHeight;
 	}
 }
 
-function popUp(url,X,Y)
-{
-    day = new Date();
-    //id = day.getTime(); // opens new window each time
-    id = 1; // opens diff. pages in same window.
-	eval("page_pop" + id + " = window.open(url, '" + id + "', 'toolbar=0,scrollbars=0,location=0,statusbar=1,"
-		+"menubar=0,resizable=0,width="+X+",height="+Y+",left = 400,top = 300');");
-}
+/*
+* Func: showimg
+* Desc: show large thumb or actual image.
+*/
+function showimg(file) {
+	if(file=="undefined")
+		return;
 
-window.onresize = function() {
-	placeMeta();
-}
-</script>
-</head>
+	var dir = "<?php echo $_GET['dir'];?>";
+	$('#shadbg').height($(document).height());
+	$('#shadbg').css("visibility","visible");
 
-<body>
-<h1><?php if($_GET['v']!="meta") echo $albumName ?></h1>
-<!-- Default Page -->
-<?php
-if($_GET['v']=="list") {
-	$currDir = scandir("./");
-	foreach($currDir as $file) {
-		in_array(strtolower(end(explode(".", $file))),$image_ext)?
-		$imgArr[] = $file : $fileArr[] = $file;
-	}
-?>
-<?php if(!is_dir($thumbDir)) { print '[<a href="?v=mgm">Create Gallery</a>]'; }
-	else { print '[<a href="?v=g">Gallery Mode</a>] [List View]'; } ?>
-<p><br /></p>
-<table class="cleared" style="width:100%">
-<tr><td colspan="3" class="cleared"><p style="font-size:14px;"><b>Image Files:</b></p></td></tr>
-<tr><td class="cleared" style="width:25%">Name</td>
-<td class="cleared" style="width:100px;">Size</td>
-<td class="cleared">Description</td></tr>
-<tr><td colspan="3" class="cleared"><hr /></td></tr>
-<?php
-foreach($imgArr as $img) {
-	$size = getimagesize($img,$info);
-    $iptc = iptcparse($info["APP13"]);
-    if($iptc["2#120"][0]=="") {
-		try {
-			if(is_file($thumbDir.$img)){
-				$size = getimagesize($thumbDir.$img,$info);
-	    		$iptc = iptcparse($info["APP13"]);
-    		}
-		} catch(Exception $err) { }
-	}
-	ereg($tagPattern,$iptc["2#120"][0],$arr);
-	$iptc["2#120"][0] = str_replace("\\","",$iptc["2#120"][0]);
-   	$iptc["2#120"][0] = strip_tags($iptc["2#120"][0]);
-	if((isset($arr) && strstr($_SESSION['gall_perm'],$arr[0])) xor !isset($arr)) {
-		print '<tr><td class="cleared">
-		<a href="'.$img.'">'.$img.'</a></td>
-		<td class="cleared">'.round(filesize($img)/pow(1024,1)).' KB</td>
-		<td class="cleared">'.$iptc["2#120"][0].'</td></tr>';
-	}
-}
-?>
-</table>
-<p><br /></p>
-<table class="cleared" style="width:100%">
-<tr><td colspan="3" class="cleared"><p style="font-size:14px;"><b>Other Files:</b></p></td></tr>
-<tr><td class="cleared" style="width:25%">Name</td>
-<td class="cleared" style="width:100px;">Size</td>
-<td class="cleared">Description</td></tr>
-<tr><td colspan="3" class="cleared"><hr /></td></tr>
-<?php
-foreach($fileArr as $file)
-	if(is_file($file) && $file!="index.php")
-	print '<tr><td class="cleared"><a href="'.$file.'">'.$file.'</a></td>
-	<td class="cleared">'.round(filesize($file)/pow(1024,1)).' KB</td>
-	<td class="cleared"></td></tr>';
-?>
-</table>
-<?php } elseif($_GET['v']=="mgm") { ?>
-<p style="width:500px;"><br />The installer is going to attempt to make thumbnails of your photos. In
-order for this utility to work properly, please ensure the following:<br /><br />
-<b>1.</b> Pop-ups are allowed for this domain.<br />
-<b>2.</b> Files are readable and writable.<br />
-<b>3.</b> You are using a compatible browser*.<br /><br />
-<a href="?v=mg" style="font-weight:bold;">Continue</a><br /><br />
-*Internet Explorer (On Windows), Firefox, Safari or Netscape.
-</p>
+	//check if lg thumbnail exists, else show orig
+	$.getJSON("?act=exist&d="+dir+"&f="+file,function(data){
+		if(!data.ret)
+			location.href=dir+"/"+file;
+		else {
+			// show lg thumb
+			$('#thumbholder').css("visibility","visible");
+			$('#lgthumb').attr("src","?act=ico&img=5");
+			$('#thumbholder').css("top",$(window).scrollTop());
+			$('#origlink').attr("href",dir+"/"+file);
 
-<?php } elseif($_GET['v']=="mg") {
-	/** Make directory for thumbs. */
-	if(!is_dir($thumbDir)) mkdir($thumbDir);
-	/** */
-	$n = 0;
-	$currImg = scanImg("./"); // Get list of images in current directory
-	print '<script type="text/javascript">
-	var imgArr = new Array();';
-	foreach($currImg as $img) {
-		print 'imgArr['.$n.'] = "'.$img.'";';
-		$n++;
-	}
-	print 'generateThumbs(imgArr);';
-	print '</script>';
-?>
+			$('#imgloader').attr("src",data.thumb);
+			$('#imgloader').load(function(){
+                $('#lgthumb').css({width:'auto',height:'auto'});
+				$('#lgthumb').attr("src",data.thumb);
+			});
 
-<p style="width:500px;"><br />Creating Thumbnails:<br /><br />
-<table style="background-color:#FFF;width:100%;" class="cleared">
- <tr>
-   <td class="cleared" style="border-top:1px solid #808080;padding:5px;vertical-align:top;">
-     Now updating your thumbnail gallery with the new images...<br /><br />
-	 Creating (<span id="icount"></span>) more thumbnails, please wait... (at <span id="imageperc"></span>%)
-	 <br /><br />
-     <table style="border:1px solid #808080;width:400px;"><tr>
-     <td class="cleared" style="background-color:#0000FF;" id="progressfull">&nbsp;</td>
-     <td class="cleared" id="progressempty">&nbsp;</td></tr>
-	 </table>Processing: <span id="imagename"></span><br /><br /><br />
-   </td>
-   <td class="cleared" id="myImage" style="border-top:1px solid #808080;padding:5px; width:1%;vertical-align:middle;">
-   <img id="instImg" style="width:100px;" /></td>
- </tr>
-</table>
-
-<div id="instOutput"></div>
-
-<?php }elseif($_GET['v']=="g" || !$_GET['v'] || $_GET['v']=="") {
-	if(is_dir($thumbDir)) {
-	$thumbImg = scanImg($thumbDir);
-	$origImg  = scanImg("./");
-?>
-<p>[Gallery Mode] [<a href="?v=list">List View</a>] <?php if(count($origImg) > count($thumbImg)){print 'New prints exist! [<a href="?v=mg">Update Gallery</a>]';} ?></p>
-<p><br /></p><p style="font-size:14px;"><b>Image Files:</b></p>
-<?php
-	foreach($thumbImg as $img) {
-		$size = getimagesize($thumbDir.$img,$info);
-    	$iptc = iptcparse($info["APP13"]);
-    	$name = reset(explode(".",$img));
-    	$t = ($iptc["2#005"][0]!="")?$iptc["2#005"][0]:cutString($name,10);
-    	ereg($tagPattern,$iptc["2#120"][0],$arr);
-    	if((isset($arr) && strstr($_SESSION['gall_perm'],$arr[0])) xor !isset($arr)) { // checks for permission tag
-			print '<div style="display:inline" id="d_'.$name.'">
-			       <a name="'.$name.'" href="'.$img.'"><img id="'.$name.'" src="'.$thumbDir.$img.'"
-				   style="border:15px solid #FFF;border-bottom:30px solid #FFF;width:'.$thumbSize.'px;height:'.$thumbSize.'px;" /></a></div>
-				   <div style="position:absolute; top: -30px; left:0px;font-size:11px;" id="info_'.$name.'">
-				   <table class="cleared" style="width:'.$thumbSize.'px;"><tr><td class="cleared" style="font-size:11px;">'.$t.'</td>
-				   <td class="cleared" style="text-align:right;font-size:11px;"><a href="#'.$name.'"
-				   onclick="popUp(\'?v=meta&amp;file='.$img.'&amp;r='.$_GET['r'].'\',225,323);">Info</a></td></tr></table></div>';
-			echo "\n";
+			// show prev and next links
+			aid=parseInt(aid);
+			$('#prevlink').attr("href","#img="+iarr[(aid-1)]+"&aid="+(aid-1));
+			$('#nextlink').attr("href","#img="+iarr[(aid+1)]+"&aid="+(aid+1));
+			if(aid < 1) $('#prevlink').html(""); else $('#prevlink').html("&laquo;");
+			if(aid == iarr.length-1) $('#nextlink').html(""); else $('#nextlink').html("&raquo;");
 		}
-		unset($arr);
+	});
+}
+
+function unshowimg() {
+	if(bover==1) { bover=0; return; }
+	$(this).css("visibility","hidden");
+	$('#thumbholder').css("visibility","hidden");
+	$('#shadbg').css("visibility","hidden");
+	$.bbq.pushState("img","");
+	$.bbq.pushState("aid","");
+}
+
+/*
+* Run-time operations
+*/
+$(document).ready(function(){
+
+	var qsf = $.deparam.fragment();
+	if(typeof(qsf.img)=="string" && qsf.img!='') {
+		aid = qsf.aid;
+		showimg(qsf.img);
 	}
-	}else{
-		print '[<a href="?v=mgm">Create Gallery</a>]';
-	}
-?>
-<script type="text/javascript">
-placeMeta();
+	$('#shadbg').height($(document).height());
+	$('#shadbg').click(function(){unshowimg();});
+	$('#thumbholder').click(function(){unshowimg();});
+
+	$(window).scroll(function(){
+		//$('#thumbholder').css("top",$(this).scrollTop());
+	});
+
+	// enables the back button in the browser - sweet
+	$(window).bind('hashchange', function(e) {
+		qsf = $.deparam.fragment();
+		if(typeof(qsf.img)=="string" && qsf.img!="") {
+			aid = qsf.aid;
+			showimg(qsf.img);
+		}
+		else
+			unshowimg();
+	});
+
+});
+
 </script>
 
+</head>
+<body>
 
-<div style="position:absolute;top: 10px; right:10px; padding:10px;background-color:#F5F5F5;border:1px solid #EEE;">
-<?php if($_SESSION['gall_perm']!="") { ?><a href="?act=auth&clear">Hide Protected Files</a><?php } else {?>
-<form method="post" action="?act=auth" id="authForm">
-<input type="text" name="tag" style="border:1px solid #DDD;" /> &nbsp;
-<input type="button" style="background-color:#FFF;border:1px solid #DDD;" value="filter"
-onclick="document.getElementById('authForm').submit();">
-</form>
-<?php } ?>
+<div style="visibility:hidden;position:absolute;z-index:-1;">
+	<img id="imgloader" style="width:1px;height:1px;" />
 </div>
 
-<?php } elseif($_GET['v'] == "meta") {
-	$size = getimagesize($thumbDir.$_GET['file'],$info);
-	list($bwidth, $bheight, $btype, $battr) = getimagesize($_GET['file']);
-	$megapixels = round(($bwidth*$bheight)/1000000,1);
-    $iptc = iptcparse($info["APP13"]);
-	$iptc["2#120"][0] = str_replace("\\,","",$iptc["2#120"][0]);
+<div class="transparent" style="" id="shadbg"></div>
+<div class="thumbholder" id="thumbholder">
+	<div style="padding:30px;color:#fff;font-size:45px;">
+		<div style="display:inline;position:relative;" onclick="showimg(iarr[aid-1]);aid--;bover=1;">
+		<a id="prevlink"></a></div>
+		<img id="lgthumb" style="border:4px solid #333;padding:0px;vertical-align:middle;width:<?php echo $thumbSize;?>px;height:<?php echo $thumbSize;?>px;" />
+		<div style="display:inline;position:relative;" onclick="showimg(iarr[aid+1]);aid++;bover=1;">
+		<a id="nextlink"></a></div>
+		<p style="cursor:pointer;color:#fff;font-size:13px;padding:top:5px;">
+			[<a href="#" id="origlink" style="color:#fff;">Full Size</a>]
+		</p>
+	</div>
+</div>
 
+<div style="position:absolute;right:20px;top:10px;font-size:9px;color:#aaa;
+	line-height:12px;cursor:default;" title="Roddzilla Webstudios Copyright � 2010">
+	<table class="cl"><tr>
+		<td style="text-align:right;padding-right:8px;">
+		Photo Insta-Gallery</td>
+		<td style="padding-top:3px;vertical-align:middle;"><img src="?act=ico&img=4" /></td>
+	</tr></table>
+</div>
+
+<?php
+
+/*
+* $_GET['view'] controls what content is seen on a per page basis. Pages:
+* Start page: opening page decides where to redirect
+* Install page: makes thumbnails
+* Gallery page: displays images
+*/
+
+if($_GET['view'] == "install") {
+	// Get a list of only directories (in order)
+	//print_r($dirs);
+	$n = 0;
+	$m = 0;
+	foreach(dirScan('.') as $k=>$f) {
+		$dirs[$f["dir"]] = 1;
+
+		//echo $f['full']." ".filesize($f['full'])."<br>";
+		if(filesize($f['full']) > 8388608)
+			continue;
+
+		// Get list of files that need square thumbs
+		if(!is_file($f['dir']."/".$thumbDir."/".$thumbSfx.$f['file'])) {
+			$sqbuff .= "sqfiles[".$n."]=\"".$f['full']."\"; \n";
+			$n++;
+		}
+
+		// Get list of files that need regular (larger) thumbs
+		if(!is_file($f['dir']."/".$thumbDir."/".$thumbPfx.$f['file'])) {
+			$lgbuff .= "lgfiles[".$m."]=\"".$f['full']."\"; \n";
+			$m++;
+		}
+	}
+	$dirs=array_keys($dirs);
 ?>
-<form method="post" action="?act=embed&amp;file=<?php echo $_GET['file'] ?>">
-<table class="cleared" style="background-color:#D4D0C7;width:100%;"><tr>
-<td style="padding:4px;border-bottom:1px solid #808080;">
-<input type="text" class="area" name="title" style="background-color:#D4D0C7;width:100%;" value="<?php echo $iptc["2#005"][0] ?>" />
-</td></tr></table>
-<table class="cleared"><tr><td class="cleared" style="vertical-align:top;font-family:tahoma;">
-<p style="padding:4px;"><img src="<?php echo $thumbDir.$_GET['file'] ?>" style="width:130px;" /></p></td>
-<td style="vertical-align:top; padding: 4px;font-family:tahoma;"><b>MegaPixels:</b> <br /><?php echo $megapixels ?>
-<br/><br /><b>Rotate (ccw):</b><br />
-<a href="?action=rotate&amp;file=<?php echo $_GET['file'] ?>&amp;degrees=90">90</a>
-<a href="?action=rotate&amp;file=<?php echo $_GET['file'] ?>&amp;degrees=180">180</a>
-<a href="?action=rotate&amp;file=<?php echo $_GET['file'] ?>&amp;degrees=270">270</a>
 
-</td></tr></table><table class="cleared" style="width:100%"><tr><td style="padding:5px;font-family:tahoma;">
-<p><b>Details:</b><br /><textarea name="desc" class="area" style="height:50px;width:100%;">
-<?php echo $iptc["2#120"][0] ?></textarea></p>
-<p style="padding-top:3px;"><b>Photographer:</b><br /><input type="text" class="area" name="author" style="width:100%;" value="<?php echo $iptc["2#080"][0] ?>" /></p>
-<p style="padding-top:5px;" id="changep"><a href="#" onclick="changeSubmit();">Change</a></p>
-</td></tr></table></form>
+<div class="installtop">
+	<div style="padding:15px 0px 20px 20px;">
+		<p style="font-size:15px;padding:3px 0px;">Gallery Insta-llation</p>
+		<p style="padding-bottom:5px;line-height:24px;">The installer is going to attempt to make thumbnails of your
+			photos. In order for this utility to work correctly, please ensure the following: </p>
+			1. Files and folders are readable and writable.<br />
+			2. The GD image library is installed and enabled.<br />
+			3. You are using IE, Firefox, Safari or Netscape.
+	</div>
+</div>
+
+<table class="cl" style="width:100%;"><tr><td style="width:350px;">
+	<div style="padding:15px 20px;line-height:17px;">
+		<input type="checkbox" id="allsubs" style="vertical-align:top;" checked disabled="disabled" />
+		<span style="">Process images in subfolders. </span><br />
+		<input type="checkbox" id="lgthumbs" style="vertical-align:top;" />
+		<span style="">Make additional larger thumbnails. </span><br />
+		<input type="checkbox" id="private" style="vertical-align:top;" disabled="disabled" />
+		<span style="">Make gallery private. </span><br />
+		<input type="checkbox" id="optimize" style="vertical-align:top;" disabled="disabled" />
+		<span style="">Optimize original files for web. </span><br />
+		<input type="checkbox" id="showcons" style="vertical-align:top;" />
+		<span style="">Show console during installation (debugging). </span><br /><br />
+		<input type="button" value="Continue &raquo;" style="font-size:12px;"
+			id="continue" onclick="javascript:install();"  />&nbsp;&nbsp;
+			<span id="installmsg" style="color:#888;"></span><br />&nbsp;
+	</div>
+</td><td style="vertical-align:top;padding:20px 30px;overflow-x:hidden;overflow:auto;" id="imgtd">
+	<div style="width:100%;" id="imgholder"></div>
+</td></tr></table>
+
+<div id="progBarHolder" style="padding:0px 20px;width:95%;height:30px;">
+	<table class="cl" style="width:100%;"><tr><td id="progress"></td>
+	<td id="antiprog"></td></tr></table>
+	<div id="countHolder" style="padding:8px 0px;"></div>
+</div>
+
+<div style="padding:20px;line-height:17px;visibility:hidden;" id="wholeconsole">
+	<div id="console" style="width:500px;height:200px;position:relative;
+		padding: 0px;overflow-y:auto;overflow-x:hidden;overflow:auto;">
+		<div style="padding:0px;background-color:#efefef;" id="consoletxt" ></div>
+	</div>
+
+	<input type="button" value="Stop Processing" style="font-size:12px;"
+		 onclick="clearInterval(timer);"  /> &nbsp;
+	<input type="button" value="Clear Console" style="font-size:12px;"
+		 onclick="getObj('consoletxt').innerHTML='';"  />
+</div>
+
+
 <script type="text/javascript">
- function changeSubmit() {
-    document.getElementById('changep').innerHTML='<b>Password:</b><br /><input type="password" name="password" class="area" /> <input type="submit" value="Edit" class="area" />';
- }
+var sqfiles = new Array();
+var lgfiles = new Array();
+<?php echo $sqbuff . $lgbuff; ?>
 </script>
+
+<?php
+
+/*
+* $_GET['view'] controls what content is seen on a per page basis. Pages:
+* Start page: opening page decides where to redirect
+* Install page: makes thumbnails
+* Gallery page: displays images
+*/
+
+} elseif($_GET['dir']||$_GET['dir']=="") { ?>
+
+	<div class="installtop">
+		<?php if(strlen($sqbuff)>0) { ?>
+			<div style="padding:10px 10px 10px 20px;position:absolute;right:0px;">
+				<p style="font-size:12px;padding:3px 0px;">
+				<?php echo "Found new subjects. <a href='?view=install'>Install them</a>."; ?>
+				</p>
+			</div>
+		<?php } ?>
+		<div style="padding:10px 0px 10px 20px;">
+			<p style="font-size:15px;padding:3px 0px;">
+			<?php
+				echo "<a href='?dir='>".$albumName."</a>";
+				$dirpieces = explode("/",$_GET['dir']);
+				foreach($dirpieces as $piece) {
+					if($piece!=end($dirpieces)) {
+						$path =($piece==reset($dirpieces))?$piece:$path."/".$piece;
+						echo " &raquo; <a href='?dir=".$path."'>".$piece."</a>";
+					}
+					else
+						echo " &raquo; ".$piece;
+				}
+			?>
+			</p>
+		</div>
+	</div>
+
+	<?php
+
+	/*
+	* Need to separate files in current directory and
+	* immediate sub folders.
+	*/
+	$n=0;
+	$skip=false;
+
+	$dir=($_GET['dir'])?$_GET['dir']:".";
+
+	// Go through all files and all subfolders
+	// Still computationally heavy for lots of images :(
+
+	foreach(dirScan($dir) as $key=>$file) {
+
+		// Filter current and prev directory pointers
+		if(substr($file['dir'],0,2)=="./")
+			$file['dir'] = substr($file['dir'],2);
+
+		// Get files in current directory. Should work when !$_GET['dir'] too
+		if(str_replace(".","/",$_GET['dir'])==$file['dir']) {
+			$curdir[$key] = $file;
+		}
+		// Get next dirs (folders within this one)
+		$getarr = explode("/",$_GET['dir']);
+		$dirarr = explode("/",$file['dir']);
+		$diff   = array_diff($dirarr,$getarr);
+
+		//print_r($getarr); echo " "; print_r($dirarr); echo " ";
+		//print_r($diff); echo "<br>";
+
+		// Filter out current dirs from dir array
+
+		//Um, Bugfix?
+		if(!$_GET['dir']) {
+			$nxtdir[$dirarr[0]] = array(
+				"name"=>$dirarr[0],
+				"full"=>$dirarr[0]
+			);
+		}
+		else
+			$nxtdir[reset($diff)] = array(
+				"name"=>reset($diff),
+				"full"=>$_GET['dir']."/".reset($diff)
+			);
+
+		$n++;
+
+	}
+	//$nxtdir=@array_unique($nxtdir);
+	//print_r($nxtdir);
+	/*
+	* Whew - got to be an easier way for nxtdirs but anyway
+	* time to start showing some stuff!
+	*/
+	?>
+
+	<div style="padding:15px 20px;">
+
+	<?php
+
+		if(sizeof($curdir)==0) {
+			// Awe, no pictures.
+			if($nxtdir) {
+				foreach($nxtdir as $dir) {
+					if($dir['name'])
+					echo "<img src='?act=ico&img=1'> &nbsp;<a href='?dir=".$dir['full']."'>".$dir['name']."</a><br> ";
+				}
+			}
+		} else {
+			if($nxtdir) {
+				echo "<p style='padding-bottom:6px;'>";
+				foreach($nxtdir as $dir) {
+					if($dir['name'])
+					echo "<img src='?act=ico&img=1'> &nbsp;<a href='?dir=".$dir['full']."'>".$dir['name']."</a><br> ";
+				}
+				echo "</p>";
+			}
+			// We have pictures... lets display them
+			$n=0;
+			foreach($curdir as $file) {
+				if(is_file($sqth=$file['dir']."/".$thumbDir."/".$thumbSfx.$file['file'])) {
+					echo "<div class='sqthumbs'><a href='#img=".$file['file']."&aid=".$n."'
+					onclick='showimg(\"".$file['file']."\");aid=".$n.";'>
+					<img src='".$sqth."' style='cursor:pointer;' /></a></div>
+					<script type='text/javascript'>iarr[".$n."]=\"".$file['file']."\";</script>";
+					$n++;
+				}
+			}
+		}
+	?>
+	</div>
+
+
+
 <?php } ?>
-</body>
-</html>
