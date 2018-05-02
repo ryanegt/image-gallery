@@ -689,16 +689,16 @@ var lgfiles = [];
 			// Awe, no pictures.
 			if($nxtdir) {
 				foreach($nxtdir as $dir) {
-					if($dir['name'])
-					echo "<span class='glyphicon glyphicon-folder-open' aria-hidden='true'></span> &nbsp;<a href='?dir=".$dir['full']."'>".$dir['name']."</a><br> ";
+					if($dir['name'] && $dir['name']!=".")
+						echo "<span class='glyphicon glyphicon-folder-open' aria-hidden='true'></span> &nbsp;<a href='?dir=".$dir['full']."'>".$dir['name']."</a><br> ";
 				}
 			}
 		} else {
 			if($nxtdir) {
 				echo "<p style='padding-bottom:6px;'>";
 				foreach($nxtdir as $dir) {
-					if($dir['name'])
-					echo "<span class='glyphicon glyphicon-folder-open' aria-hidden='true'></span> &nbsp;<a href='?dir=".$dir['full']."'>".$dir['name']."</a><br> ";
+					if($dir['name'] && $dir['name']!=".")
+						echo "<span class='glyphicon glyphicon-folder-open' aria-hidden='true'></span> &nbsp;<a href='?dir=".$dir['full']."'>".$dir['name']."</a><br> ";
 				}
 				echo "</p>";
 			}
